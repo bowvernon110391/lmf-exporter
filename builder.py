@@ -75,17 +75,49 @@ def addMeshObject(name, verts, faces, edges=None, col="Collection"):
     col.objects.link(obj)
     mesh.from_pydata(verts, edges, faces)
 
-def spawnAABB(obj):
-    m = obj.data
-    # calculate aabb
-    b = AABB()
-    for (v_idx, v) in enumerate(m.vertices):
-        if v_idx == 0:
-            b.min = list(v.co)
-            b.max = list(v.co)
+# output aabb from face data
+def faceAABB(polygon, vertices):
+    # just iterate over all vertices?
+    p = polygon
+    b = None
+    # iterate all over face
+    for (idx, v_id) in enumerate(p.vertices):
+        v = list(vertices[v_id].co)
+        if b is None:
+            b = AABB(v)
         else:
-            b.encase(list(v.co))
+            b.encase(v)
+    return b
 
+# output aabb from mesh
+def meshAABB(mesh):
+    m = mesh
+    # just use vertices in this case
+    b = None
+    for (v_idx, v) in enumerate(m.vertices):
+        pos = list(v.co)
+        if v_idx == 0:
+            b = AABB(pos)
+        else:
+            b.encase(pos)
+    return b
+
+# return polygons, sorted by aabb and split axis
+def getSortedPolys(polys, verts, axisId):
+    # copy list
+    ps = list(polys)
+
+    def sortByAxis(p):
+        b = faceAABB(p, verts)
+        return b.center()[axisId]
+
+    ps.sort(key=sortByAxis)
+    return ps
+
+# spawn aabb from aabb data
+def spawnAABB(aabb, name="AABB", col="Collection"):
+    b = aabb
+    
     # got aabb, build cube
     verts = [
         (b.min[0], b.min[1], b.max[2]),
@@ -107,8 +139,30 @@ def spawnAABB(obj):
         [5, 4, 1, 0],
     ]
 
-    addMeshObject("AABB", verts, faces)
+    addMeshObject(name, verts, faces, None, col)
+
+# spawn aabbs of faces...
+def buildAABBs(obj, col):
+    m = obj.data
+    verts = m.vertices
+    # iterate all over polys
+    msgBox("BUILDING AABBS>>>")
+    for (p_idx, p) in enumerate(m.polygons):
+        b = faceAABB(p, verts)
+        spawnAABB(b, "AABB_%d" % p_idx, col)
+    msgBox("DONE!")
 
 
+# test
+# buildAABBs(bpy.context.selected_objects[0], "aabb")
+# spawnAABB(meshAABB(bpy.context.selected_objects[0].data))
+# test sorted polys?
+mesh = bpy.context.selected_objects[0].data
+bbox = meshAABB(mesh)
 
-msgBox("Some Bish", "INFORMATION!!")
+polys = getSortedPolys(mesh.polygons, mesh.vertices, bbox.findSplittingAxis())
+
+# just build the first 50?
+for i in range(50):
+    b = faceAABB(polys[i], mesh.vertices)
+    spawnAABB(b, "AABB_%d" % i, "AABB")
