@@ -59,6 +59,102 @@ class AABB:
             return 2
 
 # another kdtreenode? heh
+# this just contain the polygons
+# the vertices would be used when rebuilding 
+# the split meshes I guess
+class KDTreeNode:
+    def __init__(self, max_polys=5000, max_depth=10, mesh=None):
+        # some default property is inbound, I guess
+        self.children = [None, None]
+        self._depth = 0
+        self._id = 0
+        self._maxPolys = max_polys
+        self._maxDepth = max_depth
+        self.aabb = AABB()
+        self.polys = []
+        self.verts = []
+        self.axisId = 0
+        self.parent = None
+
+        print("KDTREE: init with max_depth(%d), max_polys(%d)" % (max_depth, max_polys))
+        
+        # step below only valid if mesh was provided
+        if mesh is not None:
+            self.buildFromPolys(mesh.polygons, mesh.vertices)
+            # self.split()
+
+    # is it leaf? leaf has no children
+    def isLeaf(self):
+        return self.children[0] is None and self.children[1] is None
+
+    # build node from polysoup
+    def buildFromPolys(self, polys, verts):
+        # save reference?
+        self.verts = verts
+        # compute aabb first?
+        for (p_idx, p) in enumerate(polys):
+            if p_idx == 0:
+                self.aabb = faceAABB(p, verts)
+            else:
+                self.aabb.union(faceAABB(p, verts))
+        # save splitting axis
+        self.axisId = self.aabb.findSplittingAxis()
+        # copy them sorted order
+        self.polys = getSortedPolys(polys, verts, self.axisId)
+        # split
+        self.split()
+
+    # split
+    def split(self):
+        # should we?
+        if self._depth >= self._maxDepth or len(self.polys) <= self._maxPolys:
+            print("SPLIT_ABORTED: depth(%d), polycount(%d)" % (self._depth, len(self.polys)))
+            return
+        # welp, we could go further. go on!
+        # make two children?
+        self.children[0] = KDTreeNode(self._maxPolys, self._maxDepth)
+        self.children[1] = KDTreeNode(self._maxPolys, self._maxDepth)
+
+        # set relation and id and depth
+        self.children[0].parent = self
+        self.children[0]._id = self._id * 2 + 1
+        self.children[0]._depth = self._depth + 1
+
+        self.children[1].parent = self
+        self.children[1]._id = self._id * 2 + 2
+        self.children[1]._depth = self._depth + 1
+
+        # split polys (already sorted)
+        median = math.trunc(len(self.polys)/2)
+        lpolys = self.polys[:median]
+        rpolys = self.polys[median:]
+
+        # build children
+        self.children[0].buildFromPolys(lpolys, self.verts)
+        self.children[1].buildFromPolys(rpolys, self.verts)
+
+        # remove our data
+        self.polys = []
+        self.verts = []
+
+    # print something?
+    def print(self):
+        tr = self
+        # print some info?
+        parent_id = -1
+        if tr.parent is not None:
+            parent_id = tr.parent._id
+        print("(%s)node[%d]: parent(%d) depth(%d) aabb(%.2f %.2f %.2f | %.2f %.2f %.2f) poly(%d)" % (
+            ("BRANCH", "LEAF")[tr.isLeaf()],
+            tr._id, parent_id, tr._depth, tr.aabb.min[0], tr.aabb.min[1], tr.aabb.min[2],
+            tr.aabb.max[0], tr.aabb.max[1], tr.aabb.max[2], len(tr.polys)
+        ))
+
+        # add children if we're not leaf
+        if not tr.isLeaf():
+            tr.children[0].print()
+            tr.children[1].print()
+
 
 def msgBox(message = "", title = "Message Box", icon = 'INFO'):
 
@@ -154,15 +250,36 @@ def buildAABBs(obj, col):
         spawnAABB(b, "AABB_%d" % p_idx, col)
     msgBox("DONE!")
 
+# collect leaf nodes
+def collectLeaves(node):
+    stack = [node]
+    leaves = []
+    # iterate
+    while len(stack):
+        tr = stack.pop()
+        if tr.isLeaf():
+            leaves.append(tr)
+        else:
+            stack.append(tr.children[0])
+            stack.append(tr.children[1])
+    return leaves
 
 # test
 # buildAABBs(bpy.context.selected_objects[0], "aabb")
 # spawnAABB(meshAABB(bpy.context.selected_objects[0].data))
 # test sorted polys?
 mesh = bpy.context.selected_objects[0].data
-bbox = meshAABB(mesh)
 
-polys = getSortedPolys(mesh.polygons, mesh.vertices, bbox.findSplittingAxis())
-median = faceAABB(polys[math.trunc(len(polys)/2)], mesh.vertices).center()
+print("Building KDTree...")
+node = KDTreeNode(100, 10, mesh)
 
-print(median)
+print("Debug Printing...")
+node.print()
+
+print("Collecting leaves node only")
+leaves = collectLeaves(node)
+print("Got %d leaves" % len(leaves))
+print("Spawning aabbs of leaves...")
+
+for (id, l) in enumerate(leaves):
+    spawnAABB(l.aabb, "AABB_%d" % id, "AABB")
