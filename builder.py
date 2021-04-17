@@ -281,5 +281,18 @@ leaves = collectLeaves(node)
 print("Got %d leaves" % len(leaves))
 print("Spawning aabbs of leaves...")
 
-for (id, l) in enumerate(leaves):
-    spawnAABB(l.aabb, "AABB_%d" % id, "AABB")
+# iterative method?
+stack = [node]
+while len(stack):
+    tr = stack.pop()
+    colname = "depth_%d" % tr._depth
+    col = bpy.data.collections.get(colname)
+    if col is None:
+        col = bpy.data.collections.new(colname)
+        bpy.context.scene.collection.children.link(col)
+    # okay, build our aabb
+    spawnAABB(tr.aabb, "AABB_%d" % tr._id, colname)
+    # add children
+    if not tr.isLeaf():
+        stack.append(tr.children[0])
+        stack.append(tr.children[1])
