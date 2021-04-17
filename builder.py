@@ -1,4 +1,4 @@
-import bpy
+import bpy, math
 
 class AABB:
     def __init__(self, vectorInit = None):
@@ -57,6 +57,8 @@ class AABB:
             return 1
         else:
             return 2
+
+# another kdtreenode? heh
 
 def msgBox(message = "", title = "Message Box", icon = 'INFO'):
 
@@ -161,8 +163,6 @@ mesh = bpy.context.selected_objects[0].data
 bbox = meshAABB(mesh)
 
 polys = getSortedPolys(mesh.polygons, mesh.vertices, bbox.findSplittingAxis())
+median = faceAABB(polys[math.trunc(len(polys)/2)], mesh.vertices).center()
 
-# just build the first 50?
-for i in range(50):
-    b = faceAABB(polys[i], mesh.vertices)
-    spawnAABB(b, "AABB_%d" % i, "AABB")
+print(median)
