@@ -24,6 +24,20 @@ class AABB:
         d = self.max[2] - self.min[2]
         return w * h * d
 
+    # maybe compute the area?
+    def area(self):
+        w = self.max[0] - self.min[0]
+        h = self.max[1] - self.min[1]
+        d = self.max[2] - self.min[2]
+        return 2 * (w*h + h*d + w*d)
+
+    # find a max extent
+    def longestExtent(self):
+        w = self.max[0] - self.min[0]
+        h = self.max[1] - self.min[1]
+        d = self.max[2] - self.min[2]
+        return max(max(w,h), max(w,d))
+
     # try to encase a single point
     def encase(self, v):
         self.min[0] = min(self.min[0], v[0])
@@ -63,7 +77,7 @@ class AABB:
 # the vertices would be used when rebuilding 
 # the split meshes I guess
 class KDTreeNode:
-    def __init__(self, max_polys=5000, max_depth=10, mesh=None):
+    def __init__(self, max_polys=5000, max_depth=10, criterion="polycount", mesh=None):
         # some default property is inbound, I guess
         self.children = [None, None]
         self._depth = 0
@@ -76,11 +90,11 @@ class KDTreeNode:
         self.axisId = 0
         self.parent = None
 
-        print("KDTREE: init with max_depth(%d), max_polys(%d)" % (max_depth, max_polys))
+        print("KDTREE: init with max_depth(%d), %s(%.2f)" % (max_depth, criterion, max_polys))
         
         # step below only valid if mesh was provided
         if mesh is not None:
-            self.buildFromPolys(mesh.polygons, mesh.vertices)
+            self.buildFromPolys(mesh.polygons, mesh.vertices, criterion)
             # self.split()
 
     # is it leaf? leaf has no children
@@ -88,7 +102,7 @@ class KDTreeNode:
         return self.children[0] is None and self.children[1] is None
 
     # build node from polysoup
-    def buildFromPolys(self, polys, verts):
+    def buildFromPolys(self, polys, verts, criterion):
         # save reference?
         self.verts = verts
         # compute aabb first?
@@ -102,18 +116,39 @@ class KDTreeNode:
         # copy them sorted order
         self.polys = getSortedPolys(polys, verts, self.axisId)
         # split
-        self.split()
+        self.split(criterion)
 
     # split
-    def split(self):
+    def split(self, criterion="polycount"):
+        can_split = False
+        comp_value = 0
+
+        # provide several criterion
+        if criterion == "volume":
+            # if volume exceeded, split
+            comp_value = self.aabb.volume()
+            can_split = self.aabb.volume() > self._maxPolys
+        elif criterion == "area":
+            # surface area
+            comp_value = self.aabb.area()
+            can_split = self.aabb.area() > self._maxPolys
+        elif criterion == "extent":
+            # longest extent
+            comp_value = self.aabb.longestExtent()
+            can_split = self.aabb.longestExtent() > self._maxPolys
+        else:
+            # by default use num of polys
+            comp_value = len(self.polys)
+            can_split = len(self.polys) > self._maxPolys
+
         # should we?
-        if self._depth >= self._maxDepth or len(self.polys) <= self._maxPolys:
-            print("SPLIT_ABORTED: depth(%d), polycount(%d)" % (self._depth, len(self.polys)))
+        if self._depth >= self._maxDepth or not can_split:
+            print("SPLIT_ABORTED: depth(%d), %s(%.2f)" % (self._depth, criterion, comp_value))
             return
         # welp, we could go further. go on!
         # make two children?
-        self.children[0] = KDTreeNode(self._maxPolys, self._maxDepth)
-        self.children[1] = KDTreeNode(self._maxPolys, self._maxDepth)
+        self.children[0] = KDTreeNode(self._maxPolys, self._maxDepth, criterion)
+        self.children[1] = KDTreeNode(self._maxPolys, self._maxDepth, criterion)
 
         # set relation and id and depth
         self.children[0].parent = self
@@ -130,8 +165,8 @@ class KDTreeNode:
         rpolys = self.polys[median:]
 
         # build children
-        self.children[0].buildFromPolys(lpolys, self.verts)
-        self.children[1].buildFromPolys(rpolys, self.verts)
+        self.children[0].buildFromPolys(lpolys, self.verts, criterion)
+        self.children[1].buildFromPolys(rpolys, self.verts, criterion)
 
         # remove our data
         self.polys = []
@@ -271,7 +306,7 @@ def collectLeaves(node):
 mesh = bpy.context.selected_objects[0].data
 
 print("Building KDTree...")
-node = KDTreeNode(100, 10, mesh)
+node = KDTreeNode(50*50*50, 16, "volume", mesh)
 
 print("Debug Printing...")
 node.print()
@@ -280,8 +315,11 @@ print("Collecting leaves node only")
 leaves = collectLeaves(node)
 print("Got %d leaves" % len(leaves))
 print("Spawning aabbs of leaves...")
+for l in leaves:
+    spawnAABB(l.aabb, "AABB_%d" % l._id, "AABB")
 
 # iterative method?
+'''
 stack = [node]
 while len(stack):
     tr = stack.pop()
@@ -296,3 +334,4 @@ while len(stack):
     if not tr.isLeaf():
         stack.append(tr.children[0])
         stack.append(tr.children[1])
+'''
