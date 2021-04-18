@@ -216,7 +216,7 @@ def msgBox(message = "", title = "Message Box", icon = 'INFO'):
 
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
-def addMeshObject(name, verts, faces, edges=None, col="Collection", norms=None, mats=None, face_mats=None):
+def addMeshObject(name, verts, faces, edges=None, col="Collection", norms=None, mats=None, face_mats=None, uvs=None):
     if edges is None:
         edges = []
 
@@ -239,6 +239,17 @@ def addMeshObject(name, verts, faces, edges=None, col="Collection", norms=None, 
     # if we got normals, set normals from it too
     if norms is not None:
         mesh.normals_split_custom_set_from_vertices(norms)
+
+    # copy uvs too
+    if uvs is not None:
+        for (id, uvd) in enumerate(uvs):
+            print("Setting uv[%d] loops: generated(%d) vs source(%d)" % (
+                id, len(mesh.loops), len(uvd)
+            ))
+            mesh.uv_layers.new(name="uv%d" % id)
+            # set uv
+            for (v_id, coord) in enumerate(uvd):
+                mesh.uv_layers[id].data[v_id].uv = coord
 
 # output aabb from face data
 def faceAABB(polygon, vertices):
@@ -340,7 +351,8 @@ def spawnSplitMesh(node, mesh, colName):
     # references?
     verts = m.vertices
     loops = m.loops
-    mats = mesh.materials
+    mats = m.materials
+    uv_layers = m.uv_layers
 
     # collect vertices?
     u_verts = []
@@ -348,6 +360,9 @@ def spawnSplitMesh(node, mesh, colName):
     norms = []
     faces = []
     face_mats = []
+    uvs = []
+    for l in uv_layers:
+        uvs.append([])
 
     for p in n.polys:
         # save face_mats
@@ -358,11 +373,18 @@ def spawnSplitMesh(node, mesh, colName):
             # grab loop data
             l = loops[l_id]
             v_id = l.vertex_index
+
+            # store loop uv
+            for (u_id, uvdata) in enumerate(uvs):
+                uv = tuple(uv_layers[u_id].data[l_id].uv)
+                uvdata.append(uv)
+
             # grab unique vertex indices?
             pos = tuple(verts[v_id].co)
             norm = tuple(l.normal)
-
-            u_vert = (pos, norm)
+            # construct unique vertices
+            u_vert = [pos, norm]
+                
             if u_vert not in u_verts:
                 u_verts.append(u_vert)
                 vertices.append(pos)
@@ -374,7 +396,7 @@ def spawnSplitMesh(node, mesh, colName):
         # add new face
         faces.append(f)
     # spawn the mesh
-    addMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, colName, norms, mats, face_mats)
+    addMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, colName, norms, mats, face_mats, uvs)
 
 # test
 # buildAABBs(bpy.context.selected_objects[0], "aabb")
@@ -385,7 +407,7 @@ mesh = bpy.context.selected_objects[0].data
 mesh.calc_normals_split()
 
 print("Building KDTree...")
-node = KDTreeNode(100, 16, "polycount", mesh)
+node = KDTreeNode(1000, 16, "polycount", mesh)
 
 print("Debug Printing...")
 node.print()
