@@ -94,8 +94,26 @@ class KDTreeNode:
         
         # step below only valid if mesh was provided
         if mesh is not None:
+            # start here, auto split recursively too
             self.buildFromPolys(mesh.polygons, mesh.vertices, criterion)
-            # self.split()
+            # renumber our ids?
+            self.__renumber()
+
+    # renumber, using breadth first numbering
+    def __renumber(self):
+        queue = [self]
+        # iteratively
+        count = 0
+
+        while len(queue):
+            # pop front
+            tr = queue.pop(0)
+            tr._id = count
+            count += 1
+
+            if not tr.isLeaf():
+                queue.append(tr.children[0])
+                queue.append(tr.children[1])
 
     # is it leaf? leaf has no children
     def isLeaf(self):
@@ -152,11 +170,11 @@ class KDTreeNode:
 
         # set relation and id and depth
         self.children[0].parent = self
-        self.children[0]._id = self._id * 2 + 1
+        # self.children[0]._id = self._id * 2 + 1
         self.children[0]._depth = self._depth + 1
 
         self.children[1].parent = self
-        self.children[1]._id = self._id * 2 + 2
+        # self.children[1]._id = self._id * 2 + 2
         self.children[1]._depth = self._depth + 1
 
         # split polys (already sorted)
@@ -286,14 +304,15 @@ def buildAABBs(obj, col):
     msgBox("DONE!")
 
 # collect leaf nodes
-def collectLeaves(node):
+def collectGoodLeaves(node):
     stack = [node]
     leaves = []
     # iterate
     while len(stack):
-        tr = stack.pop()
+        tr = stack.pop(0)
         if tr.isLeaf():
-            leaves.append(tr)
+            if len(tr.polys):
+                leaves.append(tr)
         else:
             stack.append(tr.children[0])
             stack.append(tr.children[1])
@@ -306,32 +325,35 @@ def collectLeaves(node):
 mesh = bpy.context.selected_objects[0].data
 
 print("Building KDTree...")
-node = KDTreeNode(50*50*50, 16, "volume", mesh)
+node = KDTreeNode(5000, 16, "polycount", mesh)
 
 print("Debug Printing...")
 node.print()
 
+# iterative method?
+# print("Spawning aabb of bvhs...")
+# stack = [node]
+# while len(stack):
+#     tr = stack.pop(0)
+#     colname = "depth_%d" % tr._depth
+#     col = bpy.data.collections.get(colname)
+#     if col is None:
+#         col = bpy.data.collections.new(colname)
+#         bpy.context.scene.collection.children.link(col)
+#     # okay, build our aabb
+#     spawnAABB(tr.aabb, "AABB_%d" % tr._id, colname)
+#     # add children
+#     if not tr.isLeaf():
+#         stack.append(tr.children[0])
+#         stack.append(tr.children[1])
+
 print("Collecting leaves node only")
-leaves = collectLeaves(node)
+leaves = collectGoodLeaves(node)
+leafcol = bpy.data.collections.get("leaves")
+if leafcol is None:
+    leafcol = bpy.data.collections.new("leaves")
+    bpy.context.scene.collection.children.link(leafcol)
 print("Got %d leaves" % len(leaves))
 print("Spawning aabbs of leaves...")
 for l in leaves:
-    spawnAABB(l.aabb, "AABB_%d" % l._id, "AABB")
-
-# iterative method?
-'''
-stack = [node]
-while len(stack):
-    tr = stack.pop()
-    colname = "depth_%d" % tr._depth
-    col = bpy.data.collections.get(colname)
-    if col is None:
-        col = bpy.data.collections.new(colname)
-        bpy.context.scene.collection.children.link(col)
-    # okay, build our aabb
-    spawnAABB(tr.aabb, "AABB_%d" % tr._id, colname)
-    # add children
-    if not tr.isLeaf():
-        stack.append(tr.children[0])
-        stack.append(tr.children[1])
-'''
+    spawnAABB(l.aabb, "AABB_%d" % l._id, "leaves")
