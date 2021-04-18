@@ -216,7 +216,7 @@ def msgBox(message = "", title = "Message Box", icon = 'INFO'):
 
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
-def addMeshObject(name, verts, faces, edges=None, col="Collection"):
+def addMeshObject(name, verts, faces, edges=None, col="Collection", norms=None, mats=None, face_mats=None):
     if edges is None:
         edges = []
 
@@ -224,7 +224,21 @@ def addMeshObject(name, verts, faces, edges=None, col="Collection"):
     obj = bpy.data.objects.new(name, mesh)
     col = bpy.data.collections.get(col)
     col.objects.link(obj)
+    mesh.use_auto_smooth = True
     mesh.from_pydata(verts, edges, faces)
+    # copy materials
+    if mats is not None:
+        for mat in mats:
+            mesh.materials.append(mat)
+    
+    # set face mats
+    if face_mats is not None:
+        for (p_id, p) in enumerate(mesh.polygons):
+            p.material_index = face_mats[p_id]
+
+    # if we got normals, set normals from it too
+    if norms is not None:
+        mesh.normals_split_custom_set_from_vertices(norms)
 
 # output aabb from face data
 def faceAABB(polygon, vertices):
@@ -318,14 +332,60 @@ def collectGoodLeaves(node):
             stack.append(tr.children[1])
     return leaves
 
+# spawn split mesh?
+def spawnSplitMesh(node, mesh, colName):
+    m = mesh #bpy.data.meshes[0]
+    n = node #KDTreeNode()
+
+    # references?
+    verts = m.vertices
+    loops = m.loops
+    mats = mesh.materials
+
+    # collect vertices?
+    u_verts = []
+    vertices = []
+    norms = []
+    faces = []
+    face_mats = []
+
+    for p in n.polys:
+        # save face_mats
+        face_mats.append(p.material_index)
+        # p.vertices are indices
+        f = []
+        for l_id in p.loop_indices:
+            # grab loop data
+            l = loops[l_id]
+            v_id = l.vertex_index
+            # grab unique vertex indices?
+            pos = tuple(verts[v_id].co)
+            norm = tuple(l.normal)
+
+            u_vert = (pos, norm)
+            if u_vert not in u_verts:
+                u_verts.append(u_vert)
+                vertices.append(pos)
+                norms.append(norm)
+            # if pos not in vertices:
+            #     vertices.append(pos)
+            new_v_id = u_verts.index(u_vert)
+            f.append(new_v_id)
+        # add new face
+        faces.append(f)
+    # spawn the mesh
+    addMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, colName, norms, mats, face_mats)
+
 # test
 # buildAABBs(bpy.context.selected_objects[0], "aabb")
 # spawnAABB(meshAABB(bpy.context.selected_objects[0].data))
 # test sorted polys?
 mesh = bpy.context.selected_objects[0].data
+# first, compute loops
+mesh.calc_normals_split()
 
 print("Building KDTree...")
-node = KDTreeNode(5000, 16, "polycount", mesh)
+node = KDTreeNode(100, 16, "polycount", mesh)
 
 print("Debug Printing...")
 node.print()
@@ -353,7 +413,15 @@ leafcol = bpy.data.collections.get("leaves")
 if leafcol is None:
     leafcol = bpy.data.collections.new("leaves")
     bpy.context.scene.collection.children.link(leafcol)
+
+splitcol = bpy.data.collections.get("splits")
+if splitcol is None:
+    splitcol = bpy.data.collections.new("splits")
+    bpy.context.scene.collection.children.link(splitcol)
+
 print("Got %d leaves" % len(leaves))
 print("Spawning aabbs of leaves...")
+
 for l in leaves:
     spawnAABB(l.aabb, "AABB_%d" % l._id, "leaves")
+    spawnSplitMesh(l, mesh, "splits")
