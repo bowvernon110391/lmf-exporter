@@ -1,4 +1,5 @@
 import bpy, math
+import bpy_types
 
 class AABB:
     def __init__(self, vectorInit = None):
@@ -77,7 +78,7 @@ class AABB:
 # the vertices would be used when rebuilding 
 # the split meshes I guess
 class KDTreeNode:
-    def __init__(self, max_polys=5000, max_depth=10, criterion="polycount", mesh=None):
+    def __init__(self, max_polys=5000, max_depth=10, criterion="polycount", mesh=None, triangulate=False):
         # some default property is inbound, I guess
         self.children = [None, None]
         self._depth = 0
@@ -94,8 +95,16 @@ class KDTreeNode:
         
         # step below only valid if mesh was provided
         if mesh is not None:
+            # triangulate?
+            if triangulate:
+                mesh.calc_loop_triangles()
+
+            mesh.calc_tangents()
             # start here, auto split recursively too
-            self.buildFromPolys(mesh.polygons, mesh.vertices, criterion)
+            base_data = mesh.polygons
+            if triangulate:
+                base_data = mesh.loop_triangles
+            self.buildFromPolys(base_data, mesh.vertices, criterion, triangulate)
             # renumber our ids?
             self.__renumber()
 
@@ -120,24 +129,34 @@ class KDTreeNode:
         return self.children[0] is None and self.children[1] is None
 
     # build node from polysoup
-    def buildFromPolys(self, polys, verts, criterion):
+    def buildFromPolys(self, polys, verts, criterion, triangulate):
+        print("Building node from polys(%d), triangulate? %s" % (len(polys), triangulate))
         # save reference?
         self.verts = verts
         # compute aabb first?
         for (p_idx, p) in enumerate(polys):
             if p_idx == 0:
-                self.aabb = faceAABB(p, verts)
+                if triangulate:
+                    self.aabb = triAABB(p, verts)
+                else:
+                    self.aabb = faceAABB(p, verts)
             else:
-                self.aabb.union(faceAABB(p, verts))
+                if triangulate:
+                    self.aabb.union(triAABB(p, verts))
+                else:
+                    self.aabb.union(faceAABB(p, verts))
         # save splitting axis
         self.axisId = self.aabb.findSplittingAxis()
         # copy them sorted order
-        self.polys = getSortedPolys(polys, verts, self.axisId)
+        if triangulate:
+            self.polys = getSortedTris(polys, verts, self.axisId)
+        else:
+            self.polys = getSortedPolys(polys, verts, self.axisId)
         # split
-        self.split(criterion)
+        self.split(criterion, triangulate)
 
     # split
-    def split(self, criterion="polycount"):
+    def split(self, criterion, triangulate):
         can_split = False
         comp_value = 0
 
@@ -183,8 +202,8 @@ class KDTreeNode:
         rpolys = self.polys[median:]
 
         # build children
-        self.children[0].buildFromPolys(lpolys, self.verts, criterion)
-        self.children[1].buildFromPolys(rpolys, self.verts, criterion)
+        self.children[0].buildFromPolys(lpolys, self.verts, criterion, triangulate)
+        self.children[1].buildFromPolys(rpolys, self.verts, criterion, triangulate)
 
         # remove our data
         self.polys = []
@@ -265,6 +284,17 @@ def faceAABB(polygon, vertices):
             b.encase(v)
     return b
 
+# output aabb from triangle
+def triAABB(tri, vertices):
+    b = None
+    for v_idx in tri.vertices:
+        v = list(vertices[v_idx].co)
+        if b is None:
+            b = AABB(v)
+        else:
+            b.encase(v)
+    return b
+
 # output aabb from mesh
 def meshAABB(mesh):
     m = mesh
@@ -277,6 +307,31 @@ def meshAABB(mesh):
         else:
             b.encase(pos)
     return b
+
+# return triangles, sorted by midpoint
+def getSortedTris(tris, verts, axisId):
+    # copy list
+    ps = list(tris)
+
+    def sortByAxis(t):
+        b = triAABB(t, verts)
+        return b.center()[axisId]
+
+    def sortByCenter(t):
+        v = [0, 0, 0]
+        for v_id in t.vertices:
+            p = list(verts[v_id].co)
+            v[0] += p[0]
+            v[1] += p[1]
+            v[2] += p[2]
+        v[0] = v[0] / 3.0
+        v[1] = v[1] / 3.0
+        v[2] = v[2] / 3.0
+        return v[axisId]
+
+    
+    ps.sort(key=sortByCenter)
+    return ps
 
 # return polygons, sorted by aabb and split axis
 def getSortedPolys(polys, verts, axisId):
@@ -364,16 +419,28 @@ def spawnSplitMesh(node, mesh, colName):
     for l in uv_layers:
         uvs.append([])
 
+    tri_mode = type(n.polys[0]) == bpy_types.MeshLoopTriangle
+
+    print("SPAWNING NODE[%d] MESH IN TRIANGLE? %s" % (n._id, tri_mode))
+
     for p in n.polys:
         # save face_mats
         face_mats.append(p.material_index)
         # p.vertices are indices
         f = []
-        for l_id in p.loop_indices:
+
+        index_data = []
+        if tri_mode:
+            index_data = p.loops
+        else:
+            index_data = p.loop_indices
+        # for l_id in p.loop_indices:
+        for l_id in index_data:
             # grab loop data
             l = loops[l_id]
+            
             v_id = l.vertex_index
-
+            
             # store loop uv
             for (u_id, uvdata) in enumerate(uvs):
                 uv = tuple(uv_layers[u_id].data[l_id].uv)
@@ -404,10 +471,10 @@ def spawnSplitMesh(node, mesh, colName):
 # test sorted polys?
 mesh = bpy.context.selected_objects[0].data
 # first, compute loops
-mesh.calc_normals_split()
+# mesh.calc_normals_split()
 
 print("Building KDTree...")
-node = KDTreeNode(1000, 16, "polycount", mesh)
+node = KDTreeNode(100, 16, "polycount", mesh)
 
 print("Debug Printing...")
 node.print()
