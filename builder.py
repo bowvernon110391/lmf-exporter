@@ -235,6 +235,10 @@ def msgBox(message = "", title = "Message Box", icon = 'INFO'):
 
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
+# delete mesh object
+def deleteMeshObject(mesh):
+    bpy.data.meshes.remove(mesh=mesh)
+
 # create instance of mesh object, and return it
 def createMeshObject(name, verts, faces, edges=None, norms=None, mats=None, face_mats=None, uvs=None):
     if edges is None:
