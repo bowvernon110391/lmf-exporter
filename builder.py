@@ -466,51 +466,30 @@ def spawnSplitMesh(node, mesh, colName):
     addMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, colName, norms, mats, face_mats, uvs)
 
 # test
-# buildAABBs(bpy.context.selected_objects[0], "aabb")
-# spawnAABB(meshAABB(bpy.context.selected_objects[0].data))
-# test sorted polys?
-mesh = bpy.context.selected_objects[0].data
-# first, compute loops
-# mesh.calc_normals_split()
 
-print("Building KDTree...")
-node = KDTreeNode(100, 16, "polycount", mesh)
+# mesh = bpy.context.selected_objects[0].data
 
-print("Debug Printing...")
-node.print()
+# print("Building KDTree...")
+# node = KDTreeNode(100, 16, "polycount", mesh)
 
-# iterative method?
-# print("Spawning aabb of bvhs...")
-# stack = [node]
-# while len(stack):
-#     tr = stack.pop(0)
-#     colname = "depth_%d" % tr._depth
-#     col = bpy.data.collections.get(colname)
-#     if col is None:
-#         col = bpy.data.collections.new(colname)
-#         bpy.context.scene.collection.children.link(col)
-#     # okay, build our aabb
-#     spawnAABB(tr.aabb, "AABB_%d" % tr._id, colname)
-#     # add children
-#     if not tr.isLeaf():
-#         stack.append(tr.children[0])
-#         stack.append(tr.children[1])
+# print("Debug Printing...")
+# node.print()
 
-print("Collecting leaves node only")
-leaves = collectGoodLeaves(node)
-leafcol = bpy.data.collections.get("leaves")
-if leafcol is None:
-    leafcol = bpy.data.collections.new("leaves")
-    bpy.context.scene.collection.children.link(leafcol)
+# print("Collecting leaves node only")
+# leaves = collectGoodLeaves(node)
+# leafcol = bpy.data.collections.get("leaves")
+# if leafcol is None:
+#     leafcol = bpy.data.collections.new("leaves")
+#     bpy.context.scene.collection.children.link(leafcol)
 
-splitcol = bpy.data.collections.get("splits")
-if splitcol is None:
-    splitcol = bpy.data.collections.new("splits")
-    bpy.context.scene.collection.children.link(splitcol)
+# splitcol = bpy.data.collections.get("splits")
+# if splitcol is None:
+#     splitcol = bpy.data.collections.new("splits")
+#     bpy.context.scene.collection.children.link(splitcol)
 
-print("Got %d leaves" % len(leaves))
-print("Spawning aabbs of leaves...")
+# print("Got %d leaves" % len(leaves))
+# print("Spawning aabbs of leaves...")
 
-for l in leaves:
-    spawnAABB(l.aabb, "AABB_%d" % l._id, "leaves")
-    spawnSplitMesh(l, mesh, "splits")
+# for l in leaves:
+#     spawnAABB(l.aabb, "AABB_%d" % l._id, "leaves")
+#     spawnSplitMesh(l, mesh, "splits")
