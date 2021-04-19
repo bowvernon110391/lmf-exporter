@@ -1,5 +1,6 @@
 import bpy
 import bpy_types
+import sys, array
 if bpy.data is not None:
     builder = bpy.data.texts['builder.py'].as_module()
 else:
@@ -41,6 +42,28 @@ VTF_BONE_DATA   = (1<<6)
 VTF_TWEEN   = (1<<7)
 
 VTF_DEFAULT = VTF_POS | VTF_NORMAL | VTF_UV0
+
+
+# helper to make binary buffer
+def make_buffer(format, data):
+    buf = array.array(format, data)
+    if sys.byteorder != 'little':
+        buf.byteswap()
+    return buf
+
+# compute bytes per vertex
+def bytesPerVertex(vtx_format):
+    totalSize = 0
+    if vtx_format & VTF_POS: totalSize += 12
+    if vtx_format & VTF_NORMAL: totalSize += 12
+    if vtx_format & VTF_UV0: totalSize += 8
+    if vtx_format & VTF_TANGENT_BITANGENT: totalSize += 24
+    if vtx_format & VTF_UV1: totalSize += 8
+    if vtx_format & VTF_COLOR: totalSize += 12
+    if vtx_format & VTF_BONE_DATA: totalSize += 20
+
+    return totalSize
+##
 
 def extract_buffers(mesh, format):
     m = mesh #bpy.data.meshes.new("Shit")
@@ -212,6 +235,176 @@ def write_ascii(filepath, tree, mesh, me, format=VTF_DEFAULT):
     # close
     f.close()
 
+
+# write the tree, but in binary file
+# 1b: vertex_format
+# 1b: bytes_per_vertex
+# 2b: node_count
+# 2b: mesh_obj_count
+# 2b: material_count (submeshes per mesh)
+# 32b: object_name
+# [node_count x 36b](nodes), which has: 
+# {
+#  - 4b: id
+#  - 4b: parent_id (-1 if no parent)
+#  - 24b: 6 float (aabb min - max)
+#  - 4b: mesh_object_id (-1 if no mesh_object)
+# }
+# [mesh_obj_count x (4b + material_count x 4b + bytes_per_vertex x vertex_count + triangle_count x 6b)](meshes), which has:
+# {
+#  - 4b: mesh_data_block_size (how many bytes until the end of this mesh, after this 4b here)
+#  - 2b: vertex_count
+#  - 2b: triangle_count
+#  - [material_count x 4b](submesh_data)
+#  - {
+#     - 2b: start_idx
+#     - 2b: num_elems -> triangle_count x 3
+#  - }
+#  - { vertex_buffers }
+#  - [triangle_count x 3 x 2b]{ index_buffers }
+# }
+def write_binary(filepath, tree, mesh, me, format=VTF_DEFAULT):
+    print("BINARY_WRITE: %s" % filepath)
+
+    f = open(filepath, "wb")
+
+    # collect good leaves
+    goodLeaves = builder.collectGoodLeaves(tree)
+
+    # write header
+    wb_header(f, format, bytesPerVertex(format), builder.nodeCount(tree), len(goodLeaves), len(mesh.materials), mesh.name)
+
+    # write node data
+    queue = [tree]
+    while len(queue):
+        n = queue.pop(0)
+        mesh_id = -1
+        if n in goodLeaves:
+            mesh_id = goodLeaves.index(n)
+
+        wb_node(f, n, mesh_id)
+
+        if not n.isLeaf():
+            queue.append(n.children[0])
+            queue.append(n.children[1])
+
+    # write mesh
+    for n in goodLeaves:
+        mo = builder.createSplitMesh(n, mesh)
+
+        (vb, ib) = extract_buffers(mo, format)
+        wb_mesh_data(f, mo, format)
+
+        builder.deleteMeshObject(mo)
+
+    f.close()
+
+# 1b: vertex_format
+# 1b: bytes_per_vertex
+# 2b: node_count
+# 2b: mesh_obj_count
+# 2b: material_count (submeshes per mesh)
+# 32b: object_name
+def wb_header(file, format, bpv, node_count, mesh_count, submesh_count, name):
+    f = file
+    f.write(make_buffer('B', [format, bpv]))
+    f.write(make_buffer('H', [node_count, mesh_count, submesh_count]))
+    b = bytearray(name, 'utf-8')
+    pb = b.ljust(32, b'\0')
+    f.write(pb)
+
+# [node_count x 36b](nodes), which has: 
+# {
+#  - 4b: id
+#  - 4b: parent_id (-1 if no parent)
+#  - 24b: 6 float (aabb min - max)
+#  - 4b: mesh_object_id (-1 if no mesh_object)
+# }
+def wb_node(file, node, mesh_id=1):
+    f = file
+    parent_id = -1
+    if node.parent:
+        parent_id = node.parent._id
+    
+    f.write(make_buffer('l', [node._id, parent_id]))
+    # recompute bbox (rotation)
+    bmin = (
+        min(node.aabb.min[0], node.aabb.max[0]),
+        min(node.aabb.min[2], node.aabb.max[2]),
+        min(-node.aabb.min[1], -node.aabb.max[1]),
+    )
+
+    bmax = (
+        max(node.aabb.min[0], node.aabb.max[0]),
+        max(node.aabb.min[2], node.aabb.max[2]),
+        max(-node.aabb.min[1], -node.aabb.max[1]),
+    )
+    f.write(make_buffer('f', [bmin[0], bmin[1], bmin[2], bmax[0], bmax[1], bmax[2]]))
+    f.write(make_buffer('l', [mesh_id]))
+
+# write mesh data
+# [mesh_obj_count x (4b + material_count x 4b + bytes_per_vertex x vertex_count + triangle_count x 6b)](meshes), which has:
+# {
+#  - 4b: mesh_data_block_size (how many bytes until the end of this mesh, after this 4b here)
+#  - 2b: vertex_count
+#  - 2b: triangle_count
+#  - [material_count x 4b](submesh_data)
+#  - {
+#     - 2b: start_idx
+#     - 2b: num_elems -> triangle_count x 3
+#  - }
+#  - { vertex_buffers }
+#  - [triangle_count x 3 x 2b]{ index_buffers }
+# }
+def wb_mesh_data(file, mesh, format):
+    f = file
+    (vb, ib) = extract_buffers(mesh, format)
+    vsize = bytesPerVertex(format)
+    vcount = len(vb)
+    pcount = len(mesh.polygons)
+    smcount = len(mesh.materials)
+    block_size = 4 + 4 + smcount * 4 + vcount * vsize + pcount * 6
+
+    # write mesh header
+    f.write(make_buffer('L', [block_size]))
+    f.write(make_buffer('H', [vcount, pcount]))
+    # write start and end?
+    offset = 0
+    for ids in ib:
+        start = offset
+        elem_count = len(ids) * 3
+        f.write(make_buffer('H', [start, elem_count]))
+        offset += elem_count * 2
+    # write vbuffer?
+    for v in vb:
+        d = 0
+        if format & VTF_POS:
+            data = v[d]
+            f.write(make_buffer('f', data))
+            d+=1
+        if format & VTF_NORMAL:
+            data = v[d]
+            f.write(make_buffer('f', data))
+            d+=1
+        if format & VTF_UV0:
+            data = v[d]
+            f.write(make_buffer('f', data))
+            d+=1
+        if format & VTF_TANGENT_BITANGENT:
+            data = v[d]
+            f.write(make_buffer('f', data))
+            d+=1
+        if format & VTF_UV1:
+            data = v[d]
+            f.write(make_buffer('f', data))
+            d+=1
+    # write id buffer
+    for ids in ib:
+        for t in ids:
+            f.write(make_buffer('H', t))
+
+
+
 def do_write_tree(context, filepath, format, me, max_depth, criterion, max_threshold, write_mode):
     print("Should have written the tree in format(%d), max_depth(%d), max_%s(%.2f) in %s" % (
         format, max_depth, criterion, max_threshold, write_mode
@@ -235,6 +428,8 @@ def do_write_tree(context, filepath, format, me, max_depth, criterion, max_thres
     # depending on something
     if write_mode == "ascii":
         write_ascii(filepath, tree, m, me, format)
+    else:
+        write_binary(filepath, tree, m, me, format)
 
     me.report({'INFO'}, "File written to %s" % filepath)
     return {'FINISHED'}
