@@ -235,6 +235,41 @@ def msgBox(message = "", title = "Message Box", icon = 'INFO'):
 
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
+# create instance of mesh object, and return it
+def createMeshObject(name, verts, faces, edges=None, norms=None, mats=None, face_mats=None, uvs=None):
+    if edges is None:
+        edges = []
+
+    mesh = bpy.data.meshes.new(name)    
+    mesh.use_auto_smooth = True
+    mesh.from_pydata(verts, edges, faces)
+    # copy materials
+    if mats is not None:
+        for mat in mats:
+            mesh.materials.append(mat)
+    
+    # set face mats
+    if face_mats is not None:
+        for (p_id, p) in enumerate(mesh.polygons):
+            p.material_index = face_mats[p_id]
+
+    # if we got normals, set normals from it too
+    if norms is not None:
+        mesh.normals_split_custom_set_from_vertices(norms)
+
+    # copy uvs too
+    if uvs is not None:
+        for (id, uvd) in enumerate(uvs):
+            print("Setting uv[%d] loops: generated(%d) vs source(%d)" % (
+                id, len(mesh.loops), len(uvd)
+            ))
+            mesh.uv_layers.new(name="uv%d" % id)
+            # set uv
+            for (v_id, coord) in enumerate(uvd):
+                mesh.uv_layers[id].data[v_id].uv = coord
+
+    return mesh
+
 def addMeshObject(name, verts, faces, edges=None, col="Collection", norms=None, mats=None, face_mats=None, uvs=None):
     if edges is None:
         edges = []
