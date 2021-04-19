@@ -437,6 +437,73 @@ def collectGoodLeaves(node):
             stack.append(tr.children[1])
     return leaves
 
+def createSplitMesh(node, mesh):
+    m = mesh #bpy.data.meshes[0]
+    n = node #KDTreeNode()
+
+    # references?
+    verts = m.vertices
+    loops = m.loops
+    mats = m.materials
+    uv_layers = m.uv_layers
+
+    # collect vertices?
+    u_verts = []
+    vertices = []
+    norms = []
+    faces = []
+    face_mats = []
+    uvs = []
+    for l in uv_layers:
+        uvs.append([])
+
+    tri_mode = type(n.polys[0]) == bpy_types.MeshLoopTriangle
+
+    print("CREATING NODE[%d] MESH IN TRIANGLE? %s" % (n._id, tri_mode))
+
+    for p in n.polys:
+        # save face_mats
+        face_mats.append(p.material_index)
+        # p.vertices are indices
+        f = []
+
+        index_data = []
+        if tri_mode:
+            index_data = p.loops
+        else:
+            index_data = p.loop_indices
+        # for l_id in p.loop_indices:
+        for l_id in index_data:
+            # grab loop data
+            l = loops[l_id]
+            
+            v_id = l.vertex_index
+            
+            # store loop uv
+            for (u_id, uvdata) in enumerate(uvs):
+                uv = tuple(uv_layers[u_id].data[l_id].uv)
+                uvdata.append(uv)
+
+            # grab unique vertex indices?
+            pos = tuple(verts[v_id].co)
+            norm = tuple(l.normal)
+            # construct unique vertices
+            u_vert = [pos, norm]
+                
+            if u_vert not in u_verts:
+                u_verts.append(u_vert)
+                vertices.append(pos)
+                norms.append(norm)
+            # if pos not in vertices:
+            #     vertices.append(pos)
+            new_v_id = u_verts.index(u_vert)
+            f.append(new_v_id)
+        # add new face
+        faces.append(f)
+    # spawn the mesh
+    # addMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, colName, norms, mats, face_mats, uvs)
+    return createMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, norms, mats, face_mats, uvs)
+
 # spawn split mesh?
 def spawnSplitMesh(node, mesh, colName):
     m = mesh #bpy.data.meshes[0]
@@ -503,6 +570,20 @@ def spawnSplitMesh(node, mesh, colName):
         faces.append(f)
     # spawn the mesh
     addMeshObject("SPLIT_%d" % (n._id), vertices, faces, None, colName, norms, mats, face_mats, uvs)
+
+# count nodes
+def nodeCount(tree):
+    queue = [tree]
+    
+    count = 0
+    while len(queue):
+        n = queue.pop(0)
+        count+=1
+
+        if not n.isLeaf():
+            queue.append(n.children[0])
+            queue.append(n.children[1])
+    return count
 
 # test
 
