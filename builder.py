@@ -264,7 +264,7 @@ def createMeshObject(name, verts, faces, edges=None, norms=None, mats=None, face
     # copy uvs too
     if uvs is not None:
         for (id, uvd) in enumerate(uvs):
-            print("Setting uv[%d] loops: generated(%d) vs source(%d)" % (
+            print("Copying uv[%d] loops: generated(%d) vs source(%d)" % (
                 id, len(mesh.loops), len(uvd)
             ))
             mesh.uv_layers.new(name="uv%d" % id)
@@ -459,7 +459,7 @@ def createSplitMesh(node, mesh):
 
     tri_mode = type(n.polys[0]) == bpy_types.MeshLoopTriangle
 
-    print("CREATING NODE[%d] MESH IN TRIANGLE? %s" % (n._id, tri_mode))
+    print("MESH_BUILDER: CREATING NODE[%d] MESH IN TRIANGLE? %s" % (n._id, tri_mode))
 
     for p in n.polys:
         # save face_mats

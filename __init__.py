@@ -1,11 +1,25 @@
 # ExportHelper is a helper class, defines filename and
 # invoke() function which calls the file selector.
-import bpy
 from bpy_extras.io_utils import ExportHelper
 from bpy.props import StringProperty, BoolProperty, EnumProperty, FloatProperty, IntProperty
 from bpy.types import Operator
-from . import builder
-from . import exporter
+
+
+def reload_modules():
+    print("reloading shits...")
+    import importlib
+    from . import builder
+    importlib.reload(builder)
+    from . import exporter
+    importlib.reload(exporter)
+
+
+if "bpy" in locals():
+    reload_modules()
+else:
+    import bpy
+    from . import builder
+    from . import exporter
 
 # the exporter
 bl_info = {
@@ -86,11 +100,14 @@ def menu_func_export(self, context):
 def register():
     bpy.utils.register_class(LMFExporter)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+    print("REGISTER_LMF")
+    reload_modules()
 
 
 def unregister():
     bpy.utils.unregister_class(LMFExporter)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+    print("UNREGISTER_LMF")
 
 if __name__ == "__main__":
     register()
